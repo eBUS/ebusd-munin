@@ -1,0 +1,97 @@
+#!/bin/bash
+# Munn plugin for ebusd.
+#%# family=auto
+#%# capabilities=autoconf
+#%# capabilities=suggest
+. $MUNIN_LIBDIR/plugins/plugin.sh
+if [ "$1" = "autoconf" ]; then
+  echo "yes"
+  exit 0
+fi
+if [ "$1" = "suggest" ]; then
+  echo "temp"
+  echo "press"
+  echo "power"
+  echo "hours"
+  exit 0
+fi
+prefix=`basename "$0"`
+type=${prefix##ebusd_}
+find=$type
+skip=
+if [ "$type" = "temp" ]; then
+  match="Temp(Input|Output|Bottom|Top)?\$|outsidetemp|heating_start_temp|heating_return_temp|exchange_temp"
+  skip="Bivalent|Max|Min|Outside|mc.5:|rcc.*:Flow|^ui"
+elif [ "$type" = "press" ]; then
+  match="Press(High|Low)?\$|circuit_pressure"
+  skip="KeyPress"
+elif [ "$type" = "power" ]; then
+  find="Environment"
+  find2="Yield"
+  match="Environment(Energy|Power)\$|YieldTotal\$"
+else
+  find="hours"
+  skip="mc.4:|mc.5:"
+fi
+result=`echo "find $find"|nc localhost 8888 2>/dev/null`
+if [ -z "$result" -o "x${result##ERR:*}" = "x" ]; then
+  echo "error: $result"
+  exit 1
+fi
+if [ -n "$find2" ]; then
+  result2=`echo "find $find2"|nc localhost 8888 2>/dev/null`
+  if [ -z "$result2" -o "x${result2##ERR:*}" = "x" ]; then
+    echo "error: $result2"
+    exit 1
+  fi
+  result="$result\n$result2"
+fi
+sensors=`echo "$result"|sed -e 's# =.*$##' -e 's# #:#'|egrep "$match"`
+if [ -n "$skip" ]; then
+  sensors=`echo "$sensors"|egrep -v "$skip"`
+fi
+sensors=`echo "$sensors"|sort -u`
+if [ "$1" = "config" ]; then
+  if [ "$type" = "temp" ]; then
+    echo "graph_title ebus Temperature"
+    echo "graph_vlabel Grad"
+  elif [ "$type" = "press" ]; then
+    echo "graph_title ebus Pression"
+    echo "graph_vlabel Bar"
+  elif [ "$type" = "power" ]; then
+    echo "graph_title ebus Power/Income"
+    echo "graph_vlabel kW"
+    echo "graph_period hour"
+  else
+    echo "graph_title ebus Operating hours"
+    echo "graph_vlabel h"
+    echo "graph_period hour"
+  fi
+  echo 'graph_category heating'
+  for sensor in $sensors; do
+    result=`echo "read -c ${sensor/:/ }"|nc localhost 8888 2>/dev/null|head -n 1|sed -e 's#;.*$##'`
+    if [ "x$result" = "x-" -o "x${result##ERR:*}" = "x" ]; then
+      continue
+    fi
+    name=${sensor/:/_}
+    name=${name/./_}
+    if [ "${sensor%%Total}" = "$sensor" -a ! "$type" = "hours" ]; then
+      echo ${prefix}_${name}.label ${sensor/:/ }
+    else
+      echo ${prefix}_${name}.label ${sensor/:/ } "[diff]"
+      echo ${prefix}_${name}.type COUNTER
+      echo ${prefix}_${name}.draw AREA
+    fi
+#    print_warning ${prefix}_${sensor/:/_}
+#    print_critical ${prefix}_${sensor/:/_}
+  done
+  exit 0
+fi
+for sensor in $sensors; do
+  result=`echo "read -c ${sensor/:/ }"|nc localhost 8888 2>/dev/null|head -n 1|sed -e 's#;.*$##'`
+  if [ ! "x$result" = "x-" ]; then
+    name=${sensor/:/_}
+    name=${name/./_}
+    echo ${prefix}_${name}.value $result
+  fi
+done
