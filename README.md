@@ -1,3 +1,5 @@
+this project has been moved to ebusd directly, check it out here: https://github.com/john30/ebusd/tree/master/contrib/munin
+
 # ebusd-munin
 Collection of munin plugins (see http://munin-monitoring.org/) related to ebusd (see http://github.com/john30/ebusd/).
 
